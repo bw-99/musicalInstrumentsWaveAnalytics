@@ -25,6 +25,9 @@ class WAV_FILE:
         times = np.linspace(0, t_audio, num=n_samples)
         l_channel = signal_array[0::2]
         r_channel = signal_array[1::2]
+        channels = wav_obj.getnchannels()
+        rate = wav_obj.getframerate()
+        sampwidth = wav_obj.getsampwidth()
 
         self.wav_obj = wav_obj
         self.sample_freq = sample_freq
@@ -35,6 +38,12 @@ class WAV_FILE:
         self.times = times
         self.l_channel = l_channel
         self.r_channel = r_channel
+        self.channels = 1 if channels >= 2 else channels
+        self.rate = rate
+        self.sampwidth = sampwidth
+    
+    def readframes(self, CHUNK):
+        return self.wav_obj.readframes(CHUNK)
 
 
 def save_mp3_to_wav(file_full_name):
@@ -65,20 +74,16 @@ def draw_time_amp():
 
 def draw_freq_amp():
     fig, (ax1, ax2) = plt.subplots(2, figsize=(15, 7))
+    
+    CHUNK = 1024*2
+    wf = wave.open(os.path.join("wav", sys.argv[2]), 'rb')
 
-    CHUNK = 1024 * 2             # samples per frame
-    FORMAT = pyaudio.paInt16     # audio format (bytes per sample?)
-    CHANNELS = 1                 # single channel for microphone
-    RATE = 44100                 # samples per second
     p = pyaudio.PyAudio()
-    stream = p.open(
-        format=FORMAT,
-        channels=CHANNELS,
-        rate=RATE,
-        input=True,
-        output=True,
-        frames_per_buffer=CHUNK
-    )
+    RATE = wf.getframerate()            # samples per second
+    stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
+                    channels=wf.getnchannels(),
+                    rate=wf.getframerate(),
+                    output=True)
 
     # variable for plotting
     x = np.arange(0, 2 * CHUNK, 2)       # samples (waveform)
@@ -96,33 +101,31 @@ def draw_freq_amp():
     ax1.set_ylabel('volume')
     ax1.set_ylim(0, 255)
     ax1.set_xlim(0, 2 * CHUNK)
-    plt.setp(ax1, xticks=[0, CHUNK, 2 * CHUNK], yticks=[0, 128, 255])
+    # plt.setp(ax1, xticks=[0, CHUNK, 2 * CHUNK], yticks=[0, 128, 255])
     plt.show(block=False)
     # format spectrum axes
     ax2.set_xlim(20, RATE / 2)
 
-    print('stream started')
 
     # for measuring frame rate
     frame_count = 0
     start_time = time.time()
 
+    data = wf.readframes(CHUNK)
     while True:
-        # binary data
-        data = stream.read(CHUNK)  
-        
-        # convert data to integers, make np array, then offset it by 127
-        data_int = struct.unpack(str(2 * CHUNK) + 'B', data)
+        stream.write(data)
+        data = wf.readframes(CHUNK)  
+
+        data_int = list(data)
         
         # create np array and offset by 128
-        data_np = np.array(data_int).astype('b')[::2] + 128
+        data_np = np.array(data_int).astype('b')[::4] + 128
         
         line.set_ydata(data_np)
         
         # compute FFT and update line
         yf = fft(data_int)
         line_fft.set_ydata(np.abs(yf[0:CHUNK])  / (128 * CHUNK))
-        
         # update figure canvas
         try:
             fig.canvas.draw()
@@ -136,6 +139,8 @@ def draw_freq_amp():
             print('average frame rate = {:.0f} FPS'.format(frame_rate))
             break
 
+    
+
 
 if __name__=="__main__":
 
@@ -146,7 +151,12 @@ if __name__=="__main__":
 
         get_wav_list()
         draw_time_amp()
-    elif(sys.argv[1] == "amp_freq"):
+    elif(sys.argv[1] == "freq_amp"):
+        if len(sys.argv) < 4:
+            print("python main.py option [first wav file] [second wav file] ...")
+            exit(1)
+
+        get_wav_list()
         draw_freq_amp()
     else:
         print("python main.py option [first wav file] [second wav file] ...")
